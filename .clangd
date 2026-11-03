@@ -1,0 +1,17 @@
+CompileFlags:
+  CompilationDatabase: .pio/build/esp-sta
+  Add:
+    - -isystem/home/olcay/.platformio/packages/toolchain-xtensa-esp-elf/picolibc/include
+    - -isystem/home/olcay/.platformio/packages/toolchain-xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include
+    - -isystem/home/olcay/.platformio/packages/toolchain-xtensa-esp-elf/lib/gcc/xtensa-esp-elf/15.2.0/include-fixed
+    - -isystem/home/olcay/.platformio/packages/framework-espidf/components/esp_driver_spi/include
+    - -isystem/home/olcay/.platformio/packages/framework-espidf/components/esp_hal_gpspi/include
+    - -isystem/home/olcay/.platformio/packages/framework-espidf/components/esp_hal_gpspi/esp32/include
+  Remove:
+    - -fno-shrink-wrap
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -fzero-init-padding-bits=all
+    - -fno-malloc-dce
+    - -mlongcalls
+    - -specs=*

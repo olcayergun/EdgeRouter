@@ -1,0 +1,27 @@
+menu "EdgeRouter"
+
+    menu "Wi-Fi Station"
+
+        config ROUTER_ENABLE_WIFI
+            bool "Wi-Fi bağlantısını aktif et"
+            default y
+            help
+                Wi-Fi donanımını başlatır ve yapılandırılan AP'ye bağlanır.
+
+        config ROUTER_WIFI_SSID
+            string "AP SSID"
+            default "ESP32_TestAP"
+            depends on ROUTER_ENABLE_WIFI
+            help
+                Bağlanılacak erişim noktasının (AP) adı.
+
+        config ROUTER_WIFI_PASSWORD
+            string "AP password"
+            default "1234567890"
+            depends on ROUTER_ENABLE_WIFI
+            help
+                AP şifresi. WPA2-PSK için en az 8 karakter olmalıdır.
+
+    endmenu
+
+endmenu
