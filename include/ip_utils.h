@@ -132,6 +132,17 @@ uint16_t ip_utils_checksum(const uint8_t *data, size_t len);
  */
 void ip_utils_update_checksums(uint8_t *pkt, size_t len);
 
+/**
+ * @brief TCP SYN paketlerindeki MSS (Maximum Segment Size) seçeneğini belirtilen tavan değere sınırlar.
+ *
+ * Path MTU sorunlarını ve SPI/Wi-Fi MTU sınırını aşan parçalanmaları önler.
+ *
+ * @param pkt Ham IPv4 paketi tamponu.
+ * @param len Paketin geçerli uzunluğu.
+ * @param max_mss Kabul edilen azami MSS değeri (örn. 1400).
+ */
+void ip_utils_clamp_mss(uint8_t *pkt, size_t len, uint16_t max_mss);
+
 #ifdef __cplusplus
 }
 #endif

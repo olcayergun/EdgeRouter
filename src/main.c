@@ -28,8 +28,8 @@ void app_main(void)
     printf("********************************************************************************\n\n");
     fflush(stdout);
 #else
-    /* Standart çalışma modunda logları INFO seviyesinde tut */
-    esp_log_level_set("*", ESP_LOG_INFO);
+    /* Seri portta yalnizca Hata (Error) ve Istisna (Exception) loglarini ilet */
+    esp_log_level_set("*", ESP_LOG_ERROR);
 #endif
 
 #if defined(CONFIG_NODE_ROUTER)

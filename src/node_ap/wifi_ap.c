@@ -17,8 +17,10 @@
 
 #include "esp_check.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_private/wifi.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "esp_wifi_netif.h"
@@ -148,7 +150,15 @@ static esp_err_t wifi_ap_rx_hook(esp_netif_t *esp_netif, void *buffer, size_t le
 
                         /* 2. ESP32'nin tek merkezi yönlendirme fonksiyonuna teslim et */
                         const esp_err_t fwd_err = node_ap_forward_packet(rx_buf);
-                        if (fwd_err != ESP_OK) {
+                        if (fwd_err == ESP_OK) {
+                            /* Eğer hedef AP'nin kendi IP'si değilse (WAN veya diğer istemciye yönlendirildiyse),
+                             * paket yönlendirici tarafından tüketilmiştir; LwIP'ye teslim etmeyip serbest bırak */
+                            const bool dst_is_self = (info.dst_ip == esp_ip4addr_aton("10.54.0.1"));
+                            if (!dst_is_self) {
+                                esp_wifi_internal_free_rx_buffer(eb);
+                                return ESP_OK;
+                            }
+                        } else {
                             ESP_LOGE(TAG, "node_ap_forward_packet hatasi: %s", esp_err_to_name(fwd_err));
                         }
                     }
@@ -272,8 +282,22 @@ esp_err_t wifi_ap_send(pkt_buf_t *buf)
     ip_packet_info_t info;
     const bool parsed = ip_utils_parse(buf->data, buf->len, &info);
 
-    /* Layer-2 Ethernet Çerçevesi oluştur */
-    uint8_t eth_frame[14 + PKT_BUF_MAX_PAYLOAD];
+    /*
+     * Layer-2 Ethernet Çerçevesi oluştur:
+     * Görev yığını (stack) taşmasını önlemek amacıyla çerçeve belleği yığın yerine
+     * DMA/dahili bellek havuzundan dinamik olarak tahsis edilir.
+     */
+    const size_t eth_len = buf->len + 14;
+    uint8_t *eth_frame = (uint8_t *)heap_caps_malloc(eth_len, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT);
+    if (!eth_frame) {
+        eth_frame = (uint8_t *)malloc(eth_len);
+    }
+    if (!eth_frame) {
+        ESP_LOGE(TAG, "[AP-TX #%" PRIu32 "] eth_frame bellek tahsis edilemedi", buf->seq_num);
+        pkt_buf_free(buf);
+        return ESP_ERR_NO_MEM;
+    }
+
     uint8_t ap_mac[6] = { 0 };
     uint8_t dst_mac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }; /* Varsayılan broadcast */
 
@@ -290,8 +314,8 @@ esp_err_t wifi_ap_send(pkt_buf_t *buf)
     eth_frame[13] = 0x00;
     memcpy(eth_frame + 14, buf->data, buf->len);
 
-    const size_t eth_len = buf->len + 14;
     esp_err_t err = esp_netif_transmit(s_ap_netif, eth_frame, eth_len);
+    free(eth_frame);
 
 #if ENABLE_ICMP_LATENCY_METRICS
     if (buf->is_icmp) {

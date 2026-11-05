@@ -81,8 +81,11 @@ esp_err_t node_ap_forward_packet(pkt_buf_t *buf)
     const bool dst_is_local = ((info.dst_ip & ap_mask) == (ap_net & ap_mask));
     const bool dst_is_self = (info.dst_ip == ap_self_ip);
 
-    /* TTL bir azaltılır ve sağlama toplamları (checksum) yenilenir */
+    /* TTL bir azaltılır, TCP SYN paketlerinde MSS 1400'e sınırlanır ve checksum yenilenir */
     buf->data[8]--;
+    if (info.protocol == 6) {
+        ip_utils_clamp_mss(buf->data, buf->len, 1400);
+    }
     ip_utils_update_checksums(buf->data, buf->len);
 
 #if ENABLE_ICMP_LATENCY_METRICS

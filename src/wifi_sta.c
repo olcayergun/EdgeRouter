@@ -17,8 +17,10 @@
 
 #include "esp_check.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_private/wifi.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "esp_wifi_netif.h"
@@ -118,7 +120,13 @@ static esp_err_t wifi_sta_rx_hook(esp_netif_t *esp_netif, void *buffer, size_t l
 
                         /* Paketi ara FreeRTOS kuyruk beklemesi olmaksızın doğrudan yönlendiriciye devret (Direct Dispatch) */
                         const esp_err_t fwd_err = forwarder_handle_packet(rx_buf);
-                        if (fwd_err != ESP_OK) {
+                        if (fwd_err == ESP_OK) {
+                            /* Paket yönlendirici tarafından tüketildi ve DNAT ile SPI hattına başarıyla aktarıldı.
+                             * Bu paket yerel LwIP yığıtına teslim edilmemelidir; aksi halde yerel LwIP dinlemediği
+                             * port için dış sunucuya TCP RST göndererek TCP/SSH bağlantısını koparır! */
+                            esp_wifi_internal_free_rx_buffer(eb);
+                            return ESP_OK;
+                        } else if (fwd_err != ESP_ERR_NOT_FOUND) {
                             ESP_LOGE(TAG, "forwarder_handle_packet basarisiz: %s", esp_err_to_name(fwd_err));
                         }
                     }
@@ -307,8 +315,21 @@ esp_err_t wifi_sta_send(pkt_buf_t *buf)
      * Wi-Fi sürücüsü (esp_wifi_internal_tx), fiziksel havaya aktarılmak üzere
      * Layer-2 (Ethernet II) çerçevesi bekler:
      * [Hedef MAC (AP BSSID - 6 byte)] [Kaynak MAC (STA - 6 byte)] [EtherType 0x0800 (IPv4 - 2 byte)] [IPv4 Verisi]
+     *
+     * Görev yığını (stack) taşmasını önlemek amacıyla çerçeve belleği yığın yerine
+     * DMA/dahili bellek havuzundan dinamik olarak tahsis edilir.
      */
-    uint8_t eth_frame[14 + PKT_BUF_MAX_PAYLOAD];
+    const size_t eth_len = buf->len + 14;
+    uint8_t *eth_frame = (uint8_t *)heap_caps_malloc(eth_len, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT);
+    if (!eth_frame) {
+        eth_frame = (uint8_t *)malloc(eth_len);
+    }
+    if (!eth_frame) {
+        ESP_LOGE(TAG, "[STA-TX #%" PRIu32 "] eth_frame bellek tahsis edilemedi", buf->seq_num);
+        pkt_buf_free(buf);
+        return ESP_ERR_NO_MEM;
+    }
+
     wifi_ap_record_t ap_info = { 0 };
     uint8_t sta_mac[6] = { 0 };
 
@@ -321,8 +342,8 @@ esp_err_t wifi_sta_send(pkt_buf_t *buf)
     eth_frame[13] = 0x00;
     memcpy(eth_frame + 14, buf->data, buf->len);
 
-    const size_t eth_len = buf->len + 14;
     esp_err_t err = esp_netif_transmit(s_netif, eth_frame, eth_len);
+    free(eth_frame);
 
 #if ENABLE_ICMP_LATENCY_METRICS
     if (buf->is_icmp) {

@@ -70,7 +70,9 @@ static void spi_tx_task(void *arg)
             esp_err_t tx_err = ESP_FAIL;
             if (s_spi_dev && buf->len > 0) {
                 const size_t frame_len = sizeof(spi_frame_hdr_t) + buf->len;
-                if (s_tx_dma_buf && frame_len <= (sizeof(spi_frame_hdr_t) + PKT_BUF_MAX_PAYLOAD)) {
+                /* ESP32 SPI Slave DMA denetleyicisi bayt kaybını önlemek için 4 bayt (32-bit word) katı iletim bekler */
+                const size_t dma_len = (frame_len + 3) & ~3;
+                if (s_tx_dma_buf && dma_len <= (sizeof(spi_frame_hdr_t) + PKT_BUF_MAX_PAYLOAD)) {
                     spi_frame_hdr_t *hdr = (spi_frame_hdr_t *)s_tx_dma_buf;
                     hdr->magic = SPI_FRAME_MAGIC;
                     hdr->len = (uint16_t)buf->len;
@@ -78,11 +80,16 @@ static void spi_tx_task(void *arg)
                     hdr->seq = (uint16_t)buf->seq_num;
                     memcpy(s_tx_dma_buf + sizeof(spi_frame_hdr_t), buf->data, buf->len);
 
+                    /* 4-bayt hizalaması için eklenen 1-3 dolgu (padding) baytını sıfırla */
+                    if (dma_len > frame_len) {
+                        memset(s_tx_dma_buf + frame_len, 0, dma_len - frame_len);
+                    }
+
                     spi_transaction_t trans = {
                         .flags = 0,
                         .cmd = 0,
                         .addr = 0,
-                        .length = frame_len * 8, /* Bit cinsinden iletim boyutu */
+                        .length = dma_len * 8, /* Bit cinsinden iletim boyutu (4 bayt katı) */
                         .rxlength = 0,
                         .user = NULL,
                         .tx_buffer = s_tx_dma_buf,

@@ -70,6 +70,11 @@ esp_err_t forwarder_handle_packet(pkt_buf_t *buf)
                      buf->seq_num, info.dst_str);
         }
 
+        /* TCP SYN paketlerinde MSS değerini 1400 bayta sınırla (MTU / Path MTU garantisi) */
+        if (info.protocol == 6) {
+            ip_utils_clamp_mss(buf->data, buf->len, 1400);
+        }
+
         /* [NAPT / SNAT] Dönüşüm yerinde uygulanır (Tek parse paylaşımı) */
         const esp_err_t nat_err = nat_apply_snat_fast(buf, wan_ip, &info);
         if (nat_err != ESP_OK) {
@@ -92,6 +97,11 @@ esp_err_t forwarder_handle_packet(pkt_buf_t *buf)
         return wifi_sta_send(buf);
     } else if (buf->rx_if == NET_IF_WIFI_STA) {
         buf->tx_if = NET_IF_SPI_TX;
+
+        /* Dışarıdan gelen TCP SYN-ACK yanıtlarında da MSS değerini 1400 bayta sınırla */
+        if (info.protocol == 6) {
+            ip_utils_clamp_mss(buf->data, buf->len, 1400);
+        }
 
         /* [NAPT / DNAT] Dış ağdan gelen yanıta Ters NAT uygula (Tek parse paylaşımı) */
         const esp_err_t dnat_err = nat_apply_dnat_fast(buf, &info);

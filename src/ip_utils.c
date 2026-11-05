@@ -372,3 +372,61 @@ bool ip_utils_parse(const uint8_t *pkt, size_t len, ip_packet_info_t *info)
 
     return true;
 }
+
+void ip_utils_clamp_mss(uint8_t *pkt, size_t len, uint16_t max_mss)
+{
+    if (!pkt || len < IPV4_HDR_LEN + 20) {
+        return;
+    }
+    if ((pkt[0] >> 4) != 4) {
+        return;
+    }
+    const unsigned ihl = (unsigned)(pkt[0] & 0x0F) * 4u;
+    if (len < ihl + 20) {
+        return;
+    }
+    if (pkt[9] != 6) { /* Sadece TCP (Protokol 6) */
+        return;
+    }
+
+    uint8_t *tcp = pkt + ihl;
+    const uint8_t flags = tcp[13];
+    if (!(flags & 0x02)) { /* Sadece SYN paketleri (SYN=1) */
+        return;
+    }
+
+    const unsigned tcp_hdr_len = (unsigned)(tcp[12] >> 4) * 4u;
+    if (tcp_hdr_len <= 20 || len < ihl + tcp_hdr_len) {
+        return;
+    }
+
+    /* TCP Opsiyonlarını tara */
+    size_t opt_offset = 20;
+    while (opt_offset + 1 < tcp_hdr_len) {
+        const uint8_t kind = tcp[opt_offset];
+        if (kind == 0) {
+            break; /* Opsiyon listesi sonu (EOL) */
+        }
+        if (kind == 1) {
+            opt_offset++; /* NOP */
+            continue;
+        }
+        if (opt_offset + 1 >= tcp_hdr_len) {
+            break;
+        }
+        const uint8_t opt_len = tcp[opt_offset + 1];
+        if (opt_len < 2 || opt_offset + opt_len > tcp_hdr_len) {
+            break;
+        }
+
+        /* Kind 2 = Maximum Segment Size (MSS), Uzunluk 4 bayt */
+        if (kind == 2 && opt_len == 4) {
+            const uint16_t current_mss = ((uint16_t)tcp[opt_offset + 2] << 8) | tcp[opt_offset + 3];
+            if (current_mss > max_mss) {
+                put_be16(tcp + opt_offset + 2, max_mss);
+            }
+            break;
+        }
+        opt_offset += opt_len;
+    }
+}

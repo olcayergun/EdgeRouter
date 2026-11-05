@@ -85,10 +85,14 @@ static void spi_slave_rx_task(void *arg)
                         /* CRC16 Doğrulaması */
                         const uint16_t calc_crc = ip_utils_checksum(received->data + sizeof(spi_frame_hdr_t), hdr->len);
                         if (calc_crc == hdr->crc16) {
+                            /* Başlık alanlarını memmove öncesi yerel değişkenlere kopyala (in-place kaydırma başlığı ezer) */
+                            const uint16_t pkt_len = hdr->len;
+                            const uint16_t pkt_seq = hdr->seq;
+
                             /* Veriyi yerinde (in-place) başa kaydırarak IP paketine dönüştür */
-                            memmove(received->data, received->data + sizeof(spi_frame_hdr_t), hdr->len);
-                            received->len = hdr->len;
-                            received->seq_num = (hdr->seq > 0) ? hdr->seq : ++s_rx_hw_count;
+                            memmove(received->data, received->data + sizeof(spi_frame_hdr_t), pkt_len);
+                            received->len = pkt_len;
+                            received->seq_num = (pkt_seq > 0) ? pkt_seq : ++s_rx_hw_count;
                             valid_packet = true;
                         } else {
                             ESP_LOGW(TAG, "SPI CRC hatasi! Beklenen: 0x%04X, Hesaplanan: 0x%04X (Paket dusuruldu)",
@@ -186,8 +190,10 @@ esp_err_t spi_in_start(spi_link_rx_cb_t rx_cb)
         return err;
     }
 
-    /* SPI Slave alıcı görevini Core 1'e sabitle (Core 0 Wi-Fi sürücüsüne tahsisli kalır) */
-    if (xTaskCreatePinnedToCore(spi_slave_rx_task, "spi_slv_rx", 4096, NULL, 10, NULL, 1) != pdPASS) {
+    /* SPI Slave alıcı görevini Core 1'e sabitle (Core 0 Wi-Fi sürücüsüne tahsisli kalır).
+     * Yığın boyutu, alım anında doğrudan çağrılan L2/L3 iletim (Wi-Fi driver tx)
+     * ve NAPT yığını için güvenli marj sağlayacak şekilde 8192 bayta genişletilmiştir. */
+    if (xTaskCreatePinnedToCore(spi_slave_rx_task, "spi_slv_rx", 8192, NULL, 10, NULL, 1) != pdPASS) {
         ESP_LOGE(TAG, "spi_in_start: spi_slave_rx_task olusturulamadi");
         return ESP_ERR_NO_MEM;
     }
